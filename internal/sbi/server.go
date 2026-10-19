@@ -2,8 +2,10 @@ package sbi
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"regexp"
 	"runtime/debug"
@@ -60,14 +62,26 @@ type scp interface {
 type Server struct {
 	scp
 
-	httpServer *http.Server
-	router     *gin.Engine
+	forwardingClient *http.Client
+	httpServer       *http.Server
+	router           *gin.Engine
 }
 
 func NewServer(scp scp, tlsKeyLogPath string) (*Server, error) {
 	s := &Server{
 		scp: scp,
 	}
+
+	s.forwardingClient = &http.Client{CheckRedirect: openapi.RejectRedirects, Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: time.Second,
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: !s.Config().GetTLSVerify()}, // #nosec G402 -- NF configuration
+	}}
 
 	s.router = logger_util.NewGinWithLogrus(logger.GinLog)
 	s.router.Use(cors.New(cors.Config{
@@ -291,8 +305,7 @@ func (s *Server) NonSupportAPI(gc *gin.Context) {
 	}
 
 	// Send forwarding request
-	client := &http.Client{CheckRedirect: openapi.RejectRedirects}
-	forwardResp, err := client.Do(forwardReq)
+	forwardResp, err := s.forwardingClient.Do(forwardReq)
 	if err != nil {
 		gc.JSON(http.StatusBadGateway, gin.H{"error": "Failed to forward request"})
 		return

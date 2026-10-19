@@ -30,7 +30,7 @@ type ScpApp struct {
 }
 
 func NewApp(cfg *factory.Config, tlsKeyLogPath string) (*ScpApp, error) {
-	if err := openapi.ConfigureHTTP2Clients(cfg.GetReadIdleTimeout(), cfg.GetPingTimeout()); err != nil {
+	if err := openapi.ConfigureHTTP2Clients(cfg.GetReadIdleTimeout(), cfg.GetPingTimeout(), cfg.GetTLSVerify()); err != nil {
 		return nil, err
 	}
 	var err error
